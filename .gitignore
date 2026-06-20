@@ -1,0 +1,17 @@
+build/
+.gradle/
+.idea/
+*.iml
+bin/
+out/
+classes/
+*.log
+logs/
+world/
+crash-reports/
+.mixin.out/
+.fabric/
+libraries/
+cache/
+versions/
+

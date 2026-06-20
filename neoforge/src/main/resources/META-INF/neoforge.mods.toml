@@ -1,0 +1,9 @@
+[[mods]]
+modId = "notenoughpalette"
+version = "${version}"
+displayName = "NotEnoughPalette"
+description = "Optimized palette container for Minecraft."
+license = "CC0-1.0"
+
+[[mixins]]
+config = "notenoughpalette.mixins.json"
