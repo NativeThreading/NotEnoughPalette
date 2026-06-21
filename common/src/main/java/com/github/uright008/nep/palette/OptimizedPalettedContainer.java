@@ -596,7 +596,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             for (byte id : this.ids) {
                 int unsigned = id & 0xFF;
                 if (seen.add(unsigned)) {
-                    consumer.accept(this.entry(unsigned));
+                    consumer.accept((T)this.palette[unsigned]);
                 }
             }
         }
@@ -604,7 +604,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         @Override
         public boolean maybeHas(final Predicate<T> predicate, final IdMap<T> globalMap) {
             for (int i = 0; i < this.size; i++) {
-                if (predicate.test(this.entry(i))) {
+                if (predicate.test((T)this.palette[i])) {
                     return true;
                 }
             }
@@ -615,7 +615,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         @Override
         public void forEachInPalette(final Consumer<T> consumer, final IdMap<T> globalMap) {
             for (int i = 0; i < this.size; i++) {
-                consumer.accept(this.entry(i));
+                consumer.accept((T)this.palette[i]);
             }
         }
 
@@ -635,7 +635,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
             for (int i = 0; i < localSize; i++) {
                 if (counts[i] != 0) {
-                    output.accept(this.entry(i), counts[i]);
+                    output.accept((T)this.palette[i], counts[i]);
                 }
             }
         }
@@ -651,7 +651,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             buffer.writeByte(bits);
             buffer.writeVarInt(this.size);
             for (int i = 0; i < this.size; i++) {
-                buffer.writeVarInt(globalMap.getId(this.entry(i)));
+                buffer.writeVarInt(globalMap.getId((T)this.palette[i]));
             }
 
             buffer.writeFixedSizeLongArray(new SimpleBitStorage(bits, entryCount, this.toIntIds(entryCount)).getRaw());
@@ -672,7 +672,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
             int sizeBytes = 1 + VarInt.getByteSize(this.size);
             for (int i = 0; i < this.size; i++) {
-                sizeBytes += VarInt.getByteSize(globalMap.getId(this.entry(i)));
+                sizeBytes += VarInt.getByteSize(globalMap.getId((T)this.palette[i]));
             }
 
             return sizeBytes + new SimpleBitStorage(bits, entryCount).getRaw().length * Long.BYTES;
@@ -695,7 +695,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         public List<T> paletteValues(final IdMap<T> globalMap) {
             ArrayList<T> entries = new ArrayList<>(this.size);
             for (int i = 0; i < this.size; i++) {
-                entries.add(this.entry(i));
+                entries.add((T)this.palette[i]);
             }
 
             return entries;
@@ -704,14 +704,14 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         @Override
         public void copyInto(final IndirectStorage<T> target, final IdMap<T> globalMap) {
             for (int i = 0; i < this.ids.length; i++) {
-                target.ids[i] = (byte)target.idForExisting(this.entry(this.ids[i] & 0xFF));
+                target.ids[i] = (byte)target.idForExisting((T)this.palette[this.ids[i] & 0xFF]);
             }
         }
 
         @Override
         public void copyInto(final GlobalStorage<T> target, final IdMap<T> globalMap) {
             for (int i = 0; i < this.ids.length; i++) {
-                target.setGlobalId(i, globalMap.getId(this.entry(this.ids[i] & 0xFF)));
+                target.setGlobalId(i, globalMap.getId((T)this.palette[this.ids[i] & 0xFF]));
             }
         }
 
@@ -751,7 +751,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             this.palette[id] = value;
             if (id == SMALL_PALETTE_SIZE) {
                 for (int i = 0; i <= id; i++) {
-                    this.reverse.put(this.entry(i), i);
+                    this.reverse.put((T)this.palette[i], i);
                 }
                 return id;
             }
@@ -767,7 +767,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             int bits = ceilLog2(globalMap.size());
             int[] globalIds = new int[entryCount];
             for (int i = 0; i < entryCount; i++) {
-                globalIds[i] = globalMap.getId(this.entry(this.ids[i] & 0xFF));
+                globalIds[i] = globalMap.getId((T)this.palette[this.ids[i] & 0xFF]);
             }
 
             buffer.writeByte(bits);
