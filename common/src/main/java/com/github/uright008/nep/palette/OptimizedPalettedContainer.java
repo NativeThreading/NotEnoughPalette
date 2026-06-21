@@ -28,6 +28,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
     private static final int SMALL_PALETTE_SIZE = 16;
     private static final int MAX_BYTE_PALETTE_SIZE = 256;
     private static final int GLOBAL_COUNT_INDEX_LIMIT = 1024;
+    private static final ThreadLocal<int[]> TO_INT_BUF = ThreadLocal.withInitial(() -> new int[4096]);
 
     private final T defaultValue;
     private final Strategy<T> strategy;
@@ -268,7 +269,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         int id = snapshot.idFor(value, this);
         Storage<T> target = this.storage;
         target.setId(index, id, value, this.strategy.globalMap());
-        this.setAirMask(index, value);
         return old;
     }
 
@@ -277,7 +277,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         int id = snapshot.idFor(value, this);
         Storage<T> target = this.storage;
         target.setId(index, id, value, this.strategy.globalMap());
-        this.setAirMask(index, value);
     }
 
     private BitSet createAirMask(final T value) {
@@ -525,7 +524,9 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         @Override
         public List<T> paletteValues(final IdMap<T> globalMap) {
-            return new ArrayList<>(List.of(this.value));
+            ArrayList<T> list = new ArrayList<>(1);
+            list.add(this.value);
+            return list;
         }
 
         @Override
@@ -681,7 +682,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         public int serializedSize(final IdMap<T> globalMap, final int entryCount, final int maxIndirectBits) {
             int bits = indirectBits(entryCount, this.size);
             if (bits > maxIndirectBits) {
-                return 1 + new SimpleBitStorage(ceilLog2(globalMap.size()), entryCount).getRaw().length * Long.BYTES;
+                return 1 + storageLongs(entryCount, ceilLog2(globalMap.size())) * Long.BYTES;
             }
 
             int sizeBytes = 1 + VarInt.getByteSize(this.size);
@@ -689,7 +690,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
                 sizeBytes += VarInt.getByteSize(globalMap.getId((T)this.palette[i]));
             }
 
-            return sizeBytes + new SimpleBitStorage(bits, entryCount).getRaw().length * Long.BYTES;
+            return sizeBytes + storageLongs(entryCount, bits) * Long.BYTES;
         }
 
         @Override
@@ -798,7 +799,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         }
 
         private int[] toIntIds(final int entryCount) {
-            int[] out = new int[entryCount];
+            int[] out = TO_INT_BUF.get();
             for (int i = 0; i < entryCount; i++) {
                 out[i] = this.ids[i] & 0xFF;
             }
@@ -928,7 +929,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         @Override
         public int serializedSize(final IdMap<T> globalMap, final int entryCount, final int maxIndirectBits) {
-            return 1 + new SimpleBitStorage(this.bits(entryCount, maxIndirectBits, globalMap), entryCount).getRaw().length * Long.BYTES;
+            return 1 + storageLongs(entryCount, this.bits(entryCount, maxIndirectBits, globalMap)) * Long.BYTES;
         }
 
         @Override
@@ -1001,7 +1002,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         }
 
         private int[] toIntIds(final int entryCount) {
-            int[] out = new int[entryCount];
+            int[] out = TO_INT_BUF.get();
             for (int i = 0; i < entryCount; i++) {
                 out[i] = this.ids[i];
             }
@@ -1112,7 +1113,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         @Override
         public int serializedSize(final IdMap<T> globalMap, final int entryCount, final int maxIndirectBits) {
-            return 1 + new SimpleBitStorage(this.bits(entryCount, maxIndirectBits, globalMap), entryCount).getRaw().length * Long.BYTES;
+            return 1 + storageLongs(entryCount, this.bits(entryCount, maxIndirectBits, globalMap)) * Long.BYTES;
         }
 
         @Override
@@ -1255,5 +1256,9 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         }
 
         return Math.max(1, bits);
+    }
+
+    private static int storageLongs(final int entryCount, final int bits) {
+        return (entryCount * bits + 63) / 64;
     }
 }
