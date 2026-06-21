@@ -36,19 +36,15 @@ jobs:
         id: release
         run: |
           TAG="${{ github.ref_name }}"
-          if echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "type=release" >> $GITHUB_OUTPUT
-            echo "version=${TAG#v}" >> $GITHUB_OUTPUT
-          elif echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-alpha'; then
+          VERSION="${TAG#v}"
+          if [[ "$VERSION" == 0.* ]] || echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-alpha'; then
             echo "type=alpha" >> $GITHUB_OUTPUT
-            echo "version=${TAG#v}" >> $GITHUB_OUTPUT
           elif echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-beta'; then
             echo "type=beta" >> $GITHUB_OUTPUT
-            echo "version=${TAG#v}" >> $GITHUB_OUTPUT
           else
             echo "type=release" >> $GITHUB_OUTPUT
-            echo "version=${TAG#v}" >> $GITHUB_OUTPUT
           fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - uses: Kir-Antipov/mc-publish@v3
         with:
