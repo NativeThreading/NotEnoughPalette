@@ -11,7 +11,11 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           java-version: '25'
-          distribution: 'microsoft'
+          distribution: 'temurin'
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '26'
+          distribution: 'temurin'
       - run: chmod +x ./gradlew
       - run: ./gradlew build
       - uses: actions/upload-artifact@v7
@@ -28,7 +32,11 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           java-version: '25'
-          distribution: 'microsoft'
+          distribution: 'temurin'
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '26'
+          distribution: 'temurin'
       - run: chmod +x ./gradlew
       - run: ./gradlew assemble
 
