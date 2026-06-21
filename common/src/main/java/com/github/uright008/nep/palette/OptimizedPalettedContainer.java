@@ -561,8 +561,9 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         }
 
         @Override
+        @SuppressWarnings("unchecked")
         public T valueAt(final int index, final IdMap<T> globalMap) {
-            return this.entry(this.ids[index] & 0xFF);
+            return (T)this.palette[this.ids[index] & 0xFF];
         }
 
         @Override
