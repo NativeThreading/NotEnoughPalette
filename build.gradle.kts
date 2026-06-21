@@ -12,7 +12,7 @@ tasks.register<Jar>("hybridJar") {
 
 	dependsOn(fabricJar, neoforgeJar)
 
-	archiveBaseName = rootProject.name
+	archiveBaseName = "notenoughpalette"
 	archiveVersion = modVersion
 	destinationDirectory = layout.buildDirectory.dir("libs")
 	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
