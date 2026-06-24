@@ -171,6 +171,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
                 return;
             }
 
+            int[] unpackBuf = TO_INT_BUF.get();
             if (bits <= this.maxIndirectBits) {
                 int paletteSize = buffer.readVarInt();
                 List<T> palette = new ArrayList<>(paletteSize);
@@ -180,18 +181,16 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
                 SimpleBitStorage packed = new SimpleBitStorage(bits, this.entryCount);
                 buffer.readFixedSizeLongArray(packed.getRaw());
-                int[] ids = new int[this.entryCount];
-                packed.unpack(ids);
-                this.storage = this.storageFromLocalIds(palette, ids);
+                packed.unpack(unpackBuf);
+                this.storage = this.storageFromLocalIds(palette, unpackBuf);
                 this.rebuildAirMask();
                 return;
             }
 
             SimpleBitStorage packed = new SimpleBitStorage(storageBitsForWire(bits, this.strategy), this.entryCount);
             buffer.readFixedSizeLongArray(packed.getRaw());
-            int[] globalIds = new int[this.entryCount];
-            packed.unpack(globalIds);
-            this.storage = this.globalStorageFromIds(globalIds);
+            packed.unpack(unpackBuf);
+            this.storage = this.globalStorageFromIds(unpackBuf);
             this.rebuildAirMask();
         } finally {
             this.release();
@@ -218,7 +217,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             Packed<T> packed = this.storage.pack(strategy.globalMap(), strategy.entryCount());
             Optional<LongStream> values = Optional.empty();
             if (packed.bits != 0) {
-                values = Optional.of(Arrays.stream(new SimpleBitStorage(packed.bits, strategy.entryCount(), packed.ids).getRaw()));
+                values = Optional.of(Arrays.stream(packBits(packed.bits, strategy.entryCount(), packed.ids)));
             }
 
             return new PalettedContainerRO.PackedData<>(packed.palette, values, packed.bits);
@@ -258,6 +257,16 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         return new OptimizedPalettedContainer<>(this.defaultValue, this.strategy, this.storage.copy(), this.airMask);
     }
 
+    /**
+     * Returns true if this container holds a single value and that value is air.
+     * Allows callers to bypass valueAt() entirely for uniform-air sections.
+     */
+    public boolean isUniformAir() {
+        return this.tracksAir
+            && this.storage instanceof SingleStorage<T> single
+            && isAir(single.value());
+    }
+
     @Override
     public PalettedContainer<T> recreate() {
         return new OptimizedPalettedContainer<>(this.defaultValue, this.strategy);
@@ -294,6 +303,12 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
     private void rebuildAirMask() {
         if (!this.tracksAir) {
+            return;
+        }
+
+        // Short-circuit: SingleStorage air state is computable in O(1) from the single value
+        if (this.storage instanceof SingleStorage<T> single) {
+            this.airMask = this.createAirMask(single.value());
             return;
         }
 
@@ -551,10 +566,8 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             this.ids = new byte[entryCount];
             int cap = Math.min(1 << bits(entries.size()), MAX_BYTE_PALETTE_SIZE);
             this.palette = new Object[cap];
-            this.reverse = entries.size() > SMALL_PALETTE_SIZE
-                ? new Reference2IntOpenHashMap<>(entries.size() * 2)
-                : null;
-            if (this.reverse != null) {
+            if (entries.size() > SMALL_PALETTE_SIZE) {
+                this.reverse = new Reference2IntOpenHashMap<>(entries.size() * 2);
                 this.reverse.defaultReturnValue(-1);
             } else {
                 this.reverse = null;
@@ -669,7 +682,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
                 buffer.writeVarInt(globalMap.getId((T)this.palette[i]));
             }
 
-            buffer.writeFixedSizeLongArray(new SimpleBitStorage(bits, entryCount, this.toIntIds(entryCount)).getRaw());
+            buffer.writeFixedSizeLongArray(packBits(bits, entryCount, this.toIntIds(entryCount)));
         }
 
         @Override
@@ -731,24 +744,12 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         }
 
         private int find(final T value) {
-            if (this.size <= SMALL_PALETTE_SIZE) {
-                for (int i = 0; i < this.size; i++) {
-                    if (this.palette[i] == value) {
-                        return i;
-                    }
-                }
-
-                return -1;
+            if (this.reverse != null) {
+                return this.reverse.getInt(value);
             }
 
-            int id = this.reverse.getInt(value);
-            if (id >= 0) {
-                return id;
-            }
-
-            for (int i = 0; i < SMALL_PALETTE_SIZE; i++) {
+            for (int i = 0; i < this.size; i++) {
                 if (this.palette[i] == value) {
-                    this.reverse.put(value, i);
                     return i;
                 }
             }
@@ -765,7 +766,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             int id = this.size++;
             this.ensurePaletteCapacity(id);
             this.palette[id] = value;
-            if (id == SMALL_PALETTE_SIZE) {
+            if (this.reverse == null && id == SMALL_PALETTE_SIZE) {
                 this.reverse = new Reference2IntOpenHashMap<>(MAX_BYTE_PALETTE_SIZE);
                 this.reverse.defaultReturnValue(-1);
                 for (int i = 0; i <= id; i++) {
@@ -795,7 +796,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             }
 
             buffer.writeByte(bits);
-            buffer.writeFixedSizeLongArray(new SimpleBitStorage(bits, entryCount, globalIds).getRaw());
+            buffer.writeFixedSizeLongArray(packBits(bits, entryCount, globalIds));
         }
 
         private int[] toIntIds(final int entryCount) {
@@ -807,10 +808,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             return out;
         }
 
-        @SuppressWarnings("unchecked")
-        private T entry(final int id) {
-            return (T)this.palette[id];
-        }
     }
 
     private interface GlobalStorage<T> extends Storage<T> {
@@ -919,7 +916,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         public void write(final FriendlyByteBuf buffer, final IdMap<T> globalMap, final int entryCount, final int maxIndirectBits) {
             int bits = ceilLog2(globalMap.size());
             buffer.writeByte(bits);
-            buffer.writeFixedSizeLongArray(new SimpleBitStorage(bits, entryCount, this.toIntIds(entryCount)).getRaw());
+            buffer.writeFixedSizeLongArray(packBits(bits, entryCount, this.toIntIds(entryCount)));
         }
 
         @Override
@@ -1103,7 +1100,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         public void write(final FriendlyByteBuf buffer, final IdMap<T> globalMap, final int entryCount, final int maxIndirectBits) {
             int bits = ceilLog2(globalMap.size());
             buffer.writeByte(bits);
-            buffer.writeFixedSizeLongArray(new SimpleBitStorage(bits, entryCount, this.ids).getRaw());
+            buffer.writeFixedSizeLongArray(packBits(bits, entryCount, this.ids));
         }
 
         @Override
@@ -1260,5 +1257,17 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
     private static int storageLongs(final int entryCount, final int bits) {
         return (entryCount * bits + 63) / 64;
+    }
+
+    /** Bit-pack int[] values into a long[] for wire/save format, bypassing SimpleBitStorage allocation. */
+    private static long[] packBits(final int bits, final int entryCount, final int[] values) {
+        int valuesPerLong = 64 / bits;
+        long[] result = new long[storageLongs(entryCount, bits)];
+        for (int i = 0; i < entryCount; i++) {
+            int longIdx = i / valuesPerLong;
+            int bitOffset = (i % valuesPerLong) * bits;
+            result[longIdx] |= ((long)values[i] & ((1L << bits) - 1)) << bitOffset;
+        }
+        return result;
     }
 }
