@@ -29,6 +29,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
     private static final int MAX_BYTE_PALETTE_SIZE = 256;
     private static final int GLOBAL_COUNT_INDEX_LIMIT = 1024;
     private static final ThreadLocal<int[]> TO_INT_BUF = ThreadLocal.withInitial(() -> new int[4096]);
+    private static final ThreadLocal<int[]> COUNT_BUF = ThreadLocal.withInitial(() -> new int[MAX_BYTE_PALETTE_SIZE]);
 
     private final T defaultValue;
     private final Strategy<T> strategy;
@@ -649,11 +650,11 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         @Override
         public void count(final PalettedContainer.CountConsumer<T> output, final IdMap<T> globalMap, final int entryCount) {
-            // Direct palette-based count: O(entryCount) scanning, O(size) allocation
-            // size is bounded to MAX_BYTE_PALETTE_SIZE (256), so allocation is <= 1KB
-            int[] counts = new int[this.size];
-            final byte[] localIds = this.ids;
+            // Direct palette-based count: O(entryCount) scanning with ThreadLocal buffer (no allocation)
+            int[] counts = COUNT_BUF.get();
             final int localSize = this.size;
+            Arrays.fill(counts, 0, localSize, 0);
+            final byte[] localIds = this.ids;
             for (int i = 0; i < entryCount; i++) {
                 int id = localIds[i] & 0xFF;
                 if (id < localSize) {
