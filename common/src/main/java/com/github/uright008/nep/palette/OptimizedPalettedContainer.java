@@ -89,7 +89,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             }
 
             SimpleBitStorage packed = new SimpleBitStorage(bits, strategy.entryCount(), raw);
-            int[] ids = new int[strategy.entryCount()];
+            int[] ids = TO_INT_BUF.get();
             packed.unpack(ids);
             container.storage = container.storageFromLocalIds(palette, ids);
             container.rebuildAirMask();

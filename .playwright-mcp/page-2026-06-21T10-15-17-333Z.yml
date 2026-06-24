@@ -1,0 +1,25 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - link "spark" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img [ref=e5]
+        - heading "spark" [level=1] [ref=e7]
+      - button "Switch between dark and light mode (currently dark mode)" [ref=e8] [cursor=pointer]:
+        - img [ref=e9]
+    - main [ref=e11]
+    - contentinfo [ref=e12]:
+      - link "spark" [ref=e13] [cursor=pointer]:
+        - /url: https://github.com/lucko/spark
+      - text: and
+      - link "spark-viewer" [ref=e14] [cursor=pointer]:
+        - /url: https://github.com/lucko/spark-viewer
+      - text: are free & open source on GitHub.
+      - text: Copyright © 2018-2026
+      - link "lucko" [ref=e15] [cursor=pointer]:
+        - /url: https://github.com/lucko
+      - text: "& other spark"
+      - link "contributors" [ref=e16] [cursor=pointer]:
+        - /url: docs/misc/Credits
+      - text: .
+  - alert [ref=e17]
