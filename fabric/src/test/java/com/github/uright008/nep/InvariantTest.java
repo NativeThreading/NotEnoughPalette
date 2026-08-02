@@ -13,8 +13,6 @@ import net.minecraft.world.level.chunk.Strategy;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
-import java.util.BitSet;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -22,10 +20,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Invariant and boundary tests for {@link OptimizedPalettedContainer}.
- *
- * <p>All invariants here are GREEN except {@link #airMask_matchesActualState_REGRESSION},
- * which is a documentation test for a known dead-code bug and is expected to
- * fail (RED) until the bug is fixed.</p>
  */
 class InvariantTest {
 
@@ -190,43 +184,25 @@ class InvariantTest {
     }
 
     /**
-     * RED by design — documentation test for a known dead-code bug.
-     *
-     * <p>{@code OptimizedPalettedContainer} declares a private {@code BitSet
-     * airMask} and a {@code setAirMask(index, value)} mutator, but
-     * {@code setAirMask} is never called from {@code set()}/{@code getAndSet()}.
-     * The mask is therefore never maintained: after writing a non-air block the
-     * reflected {@code airMask} is {@code null} (or stale) instead of matching
-     * the real air/non-air layout.</p>
-     *
-     * <p>This test asserts the mask matches the actual air positions and is
-     * EXPECTED TO FAIL. It documents the confirmed dead-code bug. If it ever
-     * goes green, the bug has been fixed and this test should be moved into the
-     * regular invariant set.</p>
+     * The uniform-air fast path ({@link OptimizedPalettedContainer#isUniformAir()})
+     * is true only while the whole section is a single air value. Writing a
+     * non-air block moves the storage out of SingleStorage, after which the
+     * container is never uniform air again — even if that cell is later reset
+     * to air (the storage stays indirect).
      */
     @Test
-    void airMask_matchesActualState_REGRESSION() {
+    void uniformAir_trueForAirDefault_falseAfterNonAirWrite() {
         OptimizedPalettedContainer<BlockState> container = new OptimizedPalettedContainer<>(
                 Blocks.AIR.defaultBlockState(),
                 Strategy.createForBlockStates(Block.BLOCK_STATE_REGISTRY));
+
+        assertThat(container.isUniformAir()).isTrue();
+
         container.set(0, 0, 0, Blocks.STONE.defaultBlockState());
+        assertThat(container.isUniformAir()).isFalse();
 
-        BitSet airMask = reflectAirMask(container);
-
-        BitSet expected = new BitSet(BLOCKS);
-        expected.set(1, BLOCKS); // every cell except index 0 is still air
-
-        assertThat(airMask).isNotNull();
-        assertThat(airMask).isEqualTo(expected);
-    }
-
-    private static BitSet reflectAirMask(OptimizedPalettedContainer<BlockState> container) {
-        try {
-            Field field = OptimizedPalettedContainer.class.getDeclaredField("airMask");
-            field.setAccessible(true);
-            return (BitSet) field.get(container);
-        } catch (ReflectiveOperationException exception) {
-            throw new AssertionError("could not reflect airMask field", exception);
-        }
+        // Back to air in the same cell: storage has already left SingleStorage.
+        container.set(0, 0, 0, Blocks.AIR.defaultBlockState());
+        assertThat(container.isUniformAir()).isFalse();
     }
 }

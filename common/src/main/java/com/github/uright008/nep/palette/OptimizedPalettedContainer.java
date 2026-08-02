@@ -7,7 +7,6 @@ import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.BitSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -38,7 +37,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
     private final boolean tracksAir;
     private final ThreadingDetector threadingDetector = new ThreadingDetector("OptimizedPalettedContainer");
     private volatile Storage<T> storage;
-    private BitSet airMask;
 
     public OptimizedPalettedContainer(final T defaultValue, final Strategy<T> strategy) {
         super(defaultValue, strategy);
@@ -50,7 +48,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         this.storage = new SingleStorage<>(defaultValue);
     }
 
-    private OptimizedPalettedContainer(final T defaultValue, final Strategy<T> strategy, final Storage<T> storage, final BitSet airMask) {
+    private OptimizedPalettedContainer(final T defaultValue, final Strategy<T> strategy, final Storage<T> storage) {
         super(defaultValue, strategy);
         this.defaultValue = defaultValue;
         this.strategy = strategy;
@@ -58,7 +56,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         this.maxIndirectBits = this.entryCount == 4096 ? 8 : 3;
         this.tracksAir = defaultValue instanceof BlockState;
         this.storage = storage;
-        this.airMask = airMask == null ? null : (BitSet)airMask.clone();
     }
 
     public static <T> DataResult<PalettedContainer<T>> unpack(final Strategy<T> strategy, final PalettedContainerRO.PackedData<T> packedData) {
@@ -76,7 +73,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
                 }
 
                 container.storage = new SingleStorage<>(palette.getFirst());
-                container.rebuildAirMask();
                 return DataResult.success(container);
             }
 
@@ -93,7 +89,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             int[] ids = TO_INT_BUF.get();
             packed.unpack(ids);
             container.storage = container.storageFromLocalIds(palette, ids);
-            container.rebuildAirMask();
             return DataResult.success(container);
         } catch (RuntimeException exception) {
             return DataResult.error(() -> "Failed to read optimized PalettedContainer: " + exception.getMessage());
@@ -168,7 +163,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             int bits = buffer.readByte();
             if (bits == 0) {
                 this.storage = new SingleStorage<>(this.strategy.globalMap().byIdOrThrow(buffer.readVarInt()));
-                this.rebuildAirMask();
                 return;
             }
 
@@ -184,7 +178,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
                 buffer.readFixedSizeLongArray(packed.getRaw());
                 packed.unpack(unpackBuf);
                 this.storage = this.storageFromLocalIds(palette, unpackBuf);
-                this.rebuildAirMask();
                 return;
             }
 
@@ -192,7 +185,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             buffer.readFixedSizeLongArray(packed.getRaw());
             packed.unpack(unpackBuf);
             this.storage = this.globalStorageFromIds(unpackBuf);
-            this.rebuildAirMask();
         } finally {
             this.release();
         }
@@ -255,7 +247,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
     @Override
     public PalettedContainer<T> copy() {
-        return new OptimizedPalettedContainer<>(this.defaultValue, this.strategy, this.storage.copy(), this.airMask);
+        return new OptimizedPalettedContainer<>(this.defaultValue, this.strategy, this.storage.copy());
     }
 
     /**
@@ -287,52 +279,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         int id = snapshot.idFor(value, this);
         Storage<T> target = this.storage;
         target.setId(index, id, value, this.strategy.globalMap());
-    }
-
-    private BitSet createAirMask(final T value) {
-        if (!this.tracksAir) {
-            return null;
-        }
-
-        BitSet mask = new BitSet(this.entryCount);
-        if (isAir(value)) {
-            mask.set(0, this.entryCount);
-        }
-
-        return mask;
-    }
-
-    private void rebuildAirMask() {
-        if (!this.tracksAir) {
-            return;
-        }
-
-        // Short-circuit: SingleStorage air state is computable in O(1) from the single value
-        if (this.storage instanceof SingleStorage<T> single) {
-            this.airMask = this.createAirMask(single.value());
-            return;
-        }
-
-        BitSet mask = new BitSet(this.entryCount);
-        Storage<T> snapshot = this.storage;
-        IdMap<T> globalMap = this.strategy.globalMap();
-        for (int i = 0; i < this.entryCount; i++) {
-            if (isAir(snapshot.valueAt(i, globalMap))) {
-                mask.set(i);
-            }
-        }
-
-        this.airMask = mask;
-    }
-
-    private void setAirMask(final int index, final T value) {
-        if (!this.tracksAir) {
-            return;
-        }
-        if (this.airMask == null) {
-            this.airMask = new BitSet(this.entryCount);
-        }
-        this.airMask.set(index, isAir(value));
     }
 
     private static boolean isAir(final Object value) {
