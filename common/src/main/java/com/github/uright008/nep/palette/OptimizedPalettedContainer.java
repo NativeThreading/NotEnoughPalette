@@ -147,7 +147,18 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
     @Override
     protected T get(final int index) {
-        return this.storage.valueAt(index, this.strategy.globalMap());
+        final Storage<T> storage = this.storage;
+        if (storage instanceof SingleStorage<T> single) {
+            return single.value();
+        }
+        if (storage instanceof IndirectStorage<T> indirect) {
+            return (T)indirect.palette()[indirect.ids()[index] & 0xFF];
+        }
+        final IdMap<T> globalMap = this.strategy.globalMap();
+        if (storage instanceof CharGlobalStorage<T> chars) {
+            return globalMap.byId(chars.ids()[index]);
+        }
+        return globalMap.byId(((IntGlobalStorage<T>)storage).ids()[index]);
     }
 
     @Override
@@ -541,6 +552,14 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             return (T)this.palette[this.ids[index] & 0xFF];
         }
 
+        byte[] ids() {
+            return this.ids;
+        }
+
+        Object[] palette() {
+            return this.palette;
+        }
+
         @Override
         public int idFor(final T value, final PaletteResize<T> resizeHandler) {
             int id = this.find(value);
@@ -786,6 +805,10 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             this.counts = buildCounts(ids);
         }
 
+        char[] ids() {
+            return this.ids;
+        }
+
         @Override
         public T valueAt(final int index, final IdMap<T> globalMap) {
             return globalMap.byIdOrThrow(this.ids[index]);
@@ -968,6 +991,10 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         IntGlobalStorage(final int[] ids) {
             this.ids = ids.clone();
             this.counts = buildCounts(ids);
+        }
+
+        int[] ids() {
+            return this.ids;
         }
 
         @Override
