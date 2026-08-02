@@ -16,4 +16,8 @@ cache/
 versions/
 
 .omo/
-.omo/
+
+# IDE metadata
+.classpath
+.project
+*.settings/
