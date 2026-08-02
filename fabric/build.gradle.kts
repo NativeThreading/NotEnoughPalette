@@ -29,6 +29,15 @@ loom {
 	}
 }
 
+fabricApi {
+	configureTests {
+		createSourceSet = true
+		modId = "nep-gametest"
+		enableGameTests = true
+		eula = true
+	}
+}
+
 repositories {
 	mavenCentral()
 }
@@ -37,6 +46,14 @@ dependencies {
 	minecraft("com.mojang:minecraft:${providers.gradleProperty("minecraft_version").get()}")
 	implementation("net.fabricmc:fabric-loader:${providers.gradleProperty("loader_version").get()}")
 	implementation("net.fabricmc.fabric-api:fabric-api:${providers.gradleProperty("fabric_api_version").get()}")
+
+	testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+	testImplementation("org.assertj:assertj-core:3.27.0")
+}
+
+tasks.test {
+	useJUnitPlatform()
 }
 
 tasks.processResources {
