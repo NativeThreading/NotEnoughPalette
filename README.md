@@ -6,7 +6,6 @@ Optimized `PalettedContainer` replacement for Minecraft 26.2 — transparently r
 
 - **O(1) `get()` / `set()`** — direct `byte[]` / `char[]` / `int[]` arrays, no vanilla `SimpleBitStorage.cellIndex()` bit-packing.
 - **Transparent** — extends `PalettedContainer<T>`, Fabric + NeoForge hybrid JAR.
-- **Air tracking** — `BitSet airMask` for O(1) air queries.
 - **Low memory** — ≤1.5× vanilla heap for typical sections; often _less_.
 - **All paths optimized** — factory creation, codec deserialization, network read/write, copy, recreate.
 
