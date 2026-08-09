@@ -22,16 +22,6 @@ chore(build): update Gradle wrapper
 - No `@ts-ignore` / `@SuppressWarnings("unchecked")` without justifying comment.
 - Keep `Storage` interface methods minimal; prefer inline over virtual dispatch on hot paths.
 
-## Testing
-
-Benchmark via spark profiler:
-
-```bash
-cd ~/fabric-server && python quick-test.py --combo nep+native --duration 60
-```
-
-Results in `~/fabric-server/bench-results/`.
-
 ## License
 
 By contributing you agree your code is licensed under MIT.
