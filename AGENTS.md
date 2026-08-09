@@ -58,11 +58,3 @@ chore(build): update Gradle wrapper
 ```
 
 Scopes: `palette`, `mixin`, `build`, `docs`
-
-## Testing
-
-Benchmark script: `~/fabric-server/quick-test.py`
-```bash
-cd ~/fabric-server && python quick-test.py --combo nep+native --duration 60
-```
-Uses spark profiler via RCON. Results in `~/fabric-server/bench-results/`.

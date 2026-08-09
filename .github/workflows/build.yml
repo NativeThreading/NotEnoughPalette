@@ -56,7 +56,7 @@ jobs:
 
       - uses: Kir-Antipov/mc-publish@v3
         with:
-          modrinth-id: a0H0XL7k
+          modrinth-id: wupAPOwH
           modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
           version: ${{ steps.release.outputs.version }}
           version-type: ${{ steps.release.outputs.type }}

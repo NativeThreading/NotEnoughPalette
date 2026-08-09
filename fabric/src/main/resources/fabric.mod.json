@@ -3,6 +3,8 @@
 	"id": "notenoughpalette",
 	"version": "${version}",
 	"name": "NotEnoughPalette",
+	"description": "Optimize Minecraft's PalettedContainer.",
+	"icon": "assets/notenoughpalette/icon.png",
 	"environment": "*",
 	"entrypoints": {
 	},

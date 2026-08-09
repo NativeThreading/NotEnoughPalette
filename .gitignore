@@ -15,3 +15,13 @@ libraries/
 cache/
 versions/
 
+.omo/
+
+# Browser-automation tooling snapshots (private dev noise)
+.playwright-mcp/
+spark-mods.txt
+
+# IDE metadata
+.classpath
+.project
+*.settings/
