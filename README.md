@@ -29,16 +29,6 @@ world.
 
 NEP on top of Lithium: **-4.6% mean MSPT**, -4.3% p95, -8.7% max, +1.9% TPS.
 
-### Historical (with NativeThreading)
-
-Measured against pure vanilla under the same 125-TNT workload:
-
-| Metric | Vanilla | NEP + Lithium + NT |
-|--------|---------|---------------------|
-| TPS | 13.4 | **18.3** |
-| MSPT (mean) | 769 ms | **55 ms** |
-| MSPT (95%ile) | 1095 ms | **64 ms** |
-
 ## Build
 
 ```bash
