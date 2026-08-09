@@ -3,6 +3,7 @@
 	"id": "notenoughpalette",
 	"version": "${version}",
 	"name": "NotEnoughPalette",
+	"icon": "assets/notenoughpalette/icon.png",
 	"environment": "*",
 	"entrypoints": {
 	},
