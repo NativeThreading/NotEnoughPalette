@@ -1,5 +1,7 @@
 # NotEnoughPalette
 
+*Optimize Minecraft's PalettedContainer.*
+
 Optimized `PalettedContainer` replacement for Minecraft 26.2 — transparently replaces vanilla block and biome storage with O(1) direct-array data structures.
 
 ## Features
