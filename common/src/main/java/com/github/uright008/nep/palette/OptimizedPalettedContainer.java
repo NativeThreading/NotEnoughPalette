@@ -1230,7 +1230,10 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
     }
 
     private static int storageLongs(final int entryCount, final int bits) {
-        return (entryCount * bits + 63) / 64;
+        // Vanilla SimpleBitStorage layout: each long packs floor(64/bits) values with
+        // padding (cellIndex = index / valuesPerLong), NOT contiguous bits across longs.
+        int valuesPerLong = 64 / bits;
+        return (entryCount + valuesPerLong - 1) / valuesPerLong;
     }
 
     /** Bit-pack int[] values into a long[] for wire/save format, bypassing SimpleBitStorage allocation. */

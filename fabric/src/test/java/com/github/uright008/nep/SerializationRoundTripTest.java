@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * W2 dim-3 serialization round-trip tests (String level, no Minecraft bootstrap).
@@ -23,26 +22,25 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * through the same wire format, asserting cell equality, bit-count preservation
  * and full buffer consumption.</p>
  *
- * <p><b>Known NEP bug (recorded, not fixed in this wave):</b>
- * {@code OptimizedPalettedContainer.packBits} allocates its long[] via
- * {@code storageLongs(entryCount, bits) = (entryCount*bits+63)/64}, but packs
- * {@code 64/bits} values per long. These formulas agree only when {@code 64/bits}
- * is exact, i.e. {@code bits in {1,2,4,8,16,32}}. For every other bit count
- * (indirect 5,6,7 and global 9+) the allocation is too small and {@code write()}
- * / {@code pack()} throw {@link ArrayIndexOutOfBoundsException}. The vanilla
- * {@code SimpleBitStorage} uses {@code ceil(entryCount / (64/bits))}, so this is
- * a genuine NEP defect. {@link #nepWrite_bitsNotDividing64_knownBug_throwsAIOOBE}
- * pins the crash; the round-trip tests here therefore cover the working regimes
- * (single, indirect bits 4/8, biome-global bits 4).</p>
+ * <p>Sizes cover every wire regime: single, indirect bits 4/8, the previously
+ * broken indirect bit 7 (100 distinct), and biome-global bits 4.</p>
  */
 class SerializationRoundTripTest {
 
     /** Block indirect, bits 4 (palette size 2..16). */
     private static final int INDIRECT_BITS4 = 16;
+    /** Block indirect, bits 7 (palette size 65..128 — the regime packBits used to mis-size). */
+    private static final int INDIRECT_BITS7 = 100;
     /** Block indirect, bits 8 (palette size 129..256). */
     private static final int INDIRECT_BITS8 = 200;
     /** Biome global, bits 4 (palette size 9..16 with a 16-value id map). */
     private static final int BIOME_GLOBAL = 10;
+
+    /** Expected wire bits for a block section holding {@code distinct} values (min 4, as in Strategy). */
+    private static int expectedBits(int distinct) {
+        int bits = distinct <= 1 ? 0 : 32 - Integer.numberOfLeadingZeros(distinct - 1);
+        return Math.max(4, bits);
+    }
 
     private static FriendlyByteBuf write(PalettedContainer<String> container) {
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
@@ -79,13 +77,13 @@ class SerializationRoundTripTest {
 
     @Test
     void roundTrip_nepWrite_nepRead_indirect() {
-        int[] sizes = {5, INDIRECT_BITS4, INDIRECT_BITS8};
+        int[] sizes = {5, INDIRECT_BITS4, INDIRECT_BITS7, INDIRECT_BITS8};
         for (int size : sizes) {
             TestIdMap idMap = TestContainers.blockIdMap(300);
             OptimizedPalettedContainer<String> container =
                     TestContainers.nepBlocks(TestContainers.defaultValue(idMap), idMap);
             TestContainers.fillDistinct(container, idMap, size);
-            assertThat(container.bitsPerEntry()).as("bits at %d distinct", size).isEqualTo(size > 128 ? 8 : 4);
+            assertThat(container.bitsPerEntry()).as("bits at %d distinct", size).isEqualTo(expectedBits(size));
 
             FriendlyByteBuf buffer = write(container);
             OptimizedPalettedContainer<String> restored =
@@ -122,7 +120,7 @@ class SerializationRoundTripTest {
 
     @Test
     void roundTrip_pack_unpack_roundTrip() {
-        int[] sizes = {5, INDIRECT_BITS4, INDIRECT_BITS8};
+        int[] sizes = {5, INDIRECT_BITS4, INDIRECT_BITS7, INDIRECT_BITS8};
         for (int size : sizes) {
             TestIdMap idMap = TestContainers.blockIdMap(300);
             Strategy<String> strategy = blockStrategy(idMap);
@@ -151,7 +149,7 @@ class SerializationRoundTripTest {
 
     @Test
     void roundTrip_pack_unpack_preservesBits() {
-        int[] sizes = {5, INDIRECT_BITS4, INDIRECT_BITS8};
+        int[] sizes = {5, INDIRECT_BITS4, INDIRECT_BITS7, INDIRECT_BITS8};
         for (int size : sizes) {
             TestIdMap idMap = TestContainers.blockIdMap(300);
             Strategy<String> strategy = blockStrategy(idMap);
@@ -195,7 +193,7 @@ class SerializationRoundTripTest {
 
     @Test
     void read_unknownBits_infersFromRawLength() {
-        int[] sizes = {5, INDIRECT_BITS4, INDIRECT_BITS8};
+        int[] sizes = {5, INDIRECT_BITS4, INDIRECT_BITS7, INDIRECT_BITS8};
         for (int size : sizes) {
             TestIdMap idMap = TestContainers.blockIdMap(300);
             Strategy<String> strategy = blockStrategy(idMap);
@@ -238,8 +236,8 @@ class SerializationRoundTripTest {
                 TestContainers.nepBlocks(TestContainers.defaultValue(singleMap), singleMap);
         assertSerializedSizeMatchesWrite(single, "single");
 
-        // indirect bits 4 and 8
-        int[] sizes = {5, INDIRECT_BITS4, INDIRECT_BITS8};
+        // indirect bits 4, 7 and 8
+        int[] sizes = {5, INDIRECT_BITS4, INDIRECT_BITS7, INDIRECT_BITS8};
         for (int size : sizes) {
             TestIdMap idMap = TestContainers.blockIdMap(300);
             OptimizedPalettedContainer<String> container =
@@ -262,20 +260,23 @@ class SerializationRoundTripTest {
     }
 
     @Test
-    void nepWrite_bitsNotDividing64_knownBug_throwsAIOOBE() {
-        // RECORDED NEP BUG (not fixed in this wave): packBits allocates
-        // (entryCount*bits+63)/64 longs but packs 64/bits values per long, which
-        // under-allocates for every bit count where 64/bits is not exact (bits 5,6,7
-        // and global 9+). The vanilla SimpleBitStorage requires ceil(entryCount/(64/bits)).
-        // A 100-distinct block section (bits 7) must therefore throw on write().
+    void roundTrip_bitsNotDividing64_roundTrips() {
+        // Regression for the packBits under-allocation bug: bits 7 (100 distinct)
+        // does not divide 64, and write() used to throw ArrayIndexOutOfBoundsException.
         TestIdMap idMap = TestContainers.blockIdMap(300);
         OptimizedPalettedContainer<String> container =
                 TestContainers.nepBlocks(TestContainers.defaultValue(idMap), idMap);
-        TestContainers.fillDistinct(container, idMap, 100);
+        TestContainers.fillDistinct(container, idMap, INDIRECT_BITS7);
         assertThat(container.bitsPerEntry()).isEqualTo(7);
 
-        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
-        assertThatThrownBy(() -> container.write(buffer))
-                .isInstanceOf(ArrayIndexOutOfBoundsException.class);
+        FriendlyByteBuf buffer = write(container);
+        OptimizedPalettedContainer<String> restored =
+                TestContainers.nepBlocks(TestContainers.defaultValue(idMap), idMap);
+        buffer.readerIndex(0);
+        restored.read(buffer);
+
+        assertThat(restored.bitsPerEntry()).isEqualTo(7);
+        TestContainers.assertCellsEqual(container, restored);
+        assertThat(buffer.readerIndex()).isEqualTo(buffer.writerIndex());
     }
 }

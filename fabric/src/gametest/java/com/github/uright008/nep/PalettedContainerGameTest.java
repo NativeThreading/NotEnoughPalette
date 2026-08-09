@@ -2,6 +2,7 @@ package com.github.uright008.nep;
 
 import com.github.uright008.nep.palette.OptimizedPalettedContainer;
 import io.netty.buffer.Unpooled;
+import java.util.List;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -26,34 +27,44 @@ import net.minecraft.world.level.chunk.PalettedContainerFactory;
  * lookups (the NT explosion-pipeline access pattern) agree with the expected
  * pattern.</p>
  *
- * <p>Palette sizes are deliberately kept so every section stays at 16 or fewer
- * distinct states (bits = 4, a divisor of 64). NEP {@code packBits} currently
- * mis-sizes its backing array for bit counts that do not divide 64 (see
- * {@code nepWrite_bitsNotDividing64_knownBug_throwsAIOOBE}), and world sections
- * start with a few terrain states; a larger test palette would push the union
- * past 16 entries and crash chunk saving.</p>
+ * <p>The save/load palette is deliberately kept at 64 distinct states so it
+ * exercises a wire bit count (6) that does not divide 64 — the regime NEP's
+ * {@code packBits} previously mis-sized and crashed on during chunk saving.</p>
  */
 public final class PalettedContainerGameTest {
 
-    /** 16 distinct states (15 solid + air): exercises the reverse-map transition at exactly 16 entries. */
-    private static final BlockState[] PALETTE = {
-        Blocks.STONE.defaultBlockState(),
-        Blocks.GRANITE.defaultBlockState(),
-        Blocks.DIORITE.defaultBlockState(),
-        Blocks.ANDESITE.defaultBlockState(),
-        Blocks.DIRT.defaultBlockState(),
-        Blocks.COARSE_DIRT.defaultBlockState(),
-        Blocks.SAND.defaultBlockState(),
-        Blocks.RED_SAND.defaultBlockState(),
-        Blocks.GRAVEL.defaultBlockState(),
-        Blocks.COBBLESTONE.defaultBlockState(),
-        Blocks.OAK_PLANKS.defaultBlockState(),
-        Blocks.SPRUCE_PLANKS.defaultBlockState(),
-        Blocks.BIRCH_PLANKS.defaultBlockState(),
-        Blocks.OAK_LOG.defaultBlockState(),
-        Blocks.OBSIDIAN.defaultBlockState(),
-        Blocks.AIR.defaultBlockState()
-    };
+    /** 64 distinct states (63 solid + air): exercises a non-64-dividing wire bit count (6) on a real section. */
+    private static final BlockState[] PALETTE = concat(
+            defaultStates(List.of(
+                    Blocks.STONE, Blocks.GRANITE, Blocks.DIORITE, Blocks.ANDESITE,
+                    Blocks.DIRT, Blocks.COARSE_DIRT, Blocks.SAND, Blocks.RED_SAND,
+                    Blocks.GRAVEL, Blocks.COBBLESTONE, Blocks.OAK_PLANKS, Blocks.SPRUCE_PLANKS,
+                    Blocks.BIRCH_PLANKS, Blocks.OAK_LOG, Blocks.OBSIDIAN, Blocks.AIR)),
+            defaultStates(Blocks.WOOL.asList()),
+            defaultStates(Blocks.CONCRETE.asList()),
+            defaultStates(Blocks.DYED_TERRACOTTA.asList()));
+
+    private static BlockState[] concat(BlockState[]... groups) {
+        int total = 0;
+        for (BlockState[] group : groups) {
+            total += group.length;
+        }
+        BlockState[] out = new BlockState[total];
+        int offset = 0;
+        for (BlockState[] group : groups) {
+            System.arraycopy(group, 0, out, offset, group.length);
+            offset += group.length;
+        }
+        return out;
+    }
+
+    private static BlockState[] defaultStates(List<Block> blocks) {
+        BlockState[] states = new BlockState[blocks.size()];
+        for (int i = 0; i < blocks.size(); i++) {
+            states[i] = blocks.get(i).defaultBlockState();
+        }
+        return states;
+    }
 
     /** Small palette for world fills: 9 + any pre-existing terrain stays ≤ 16 (bits 4). */
     private static final BlockState[] FILL_PALETTE = {
@@ -116,8 +127,9 @@ public final class PalettedContainerGameTest {
 
     @GameTest(maxTicks = 20, padding = 48)
     public void sectionSaveLoad_roundTrip(GameTestHelper helper) {
-        // Fresh factory-created sections: the palette is exactly PALETTE (16
-        // entries, bits 4), so NEP write stays in the bit counts that divide 64.
+        // Fresh factory-created sections: the palette is exactly PALETTE (64
+        // entries, bits 6), so NEP write exercises a bit count that does not
+        // divide 64 — the regime packBits used to mis-size on chunk saving.
         LevelChunkSection original = new LevelChunkSection(
                 PalettedContainerFactory.create(helper.getLevel().registryAccess()));
         helper.assertTrue(original.getStates() instanceof OptimizedPalettedContainer<?>,
