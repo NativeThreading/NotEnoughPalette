@@ -2,7 +2,7 @@
 modId = "notenoughpalette"
 version = "${version}"
 displayName = "NotEnoughPalette"
-description = "Optimized palette container for Minecraft."
+description = "Optimize Minecraft's PalettedContainer."
 license = "MIT"
 logoFile = "assets/notenoughpalette/icon.png"
 
