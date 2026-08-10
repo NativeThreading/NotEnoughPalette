@@ -16,7 +16,6 @@ import net.minecraft.core.IdMap;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.VarInt;
 import net.minecraft.util.SimpleBitStorage;
-import net.minecraft.util.ThreadingDetector;
 import net.minecraft.world.level.chunk.PaletteResize;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
@@ -32,19 +31,12 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
     private final T defaultValue;
     private final Strategy<T> strategy;
-    private final int entryCount;
-    private final int maxIndirectBits;
-    private final boolean tracksAir;
-    private final ThreadingDetector threadingDetector = new ThreadingDetector("OptimizedPalettedContainer");
     private volatile Storage<T> storage;
 
     public OptimizedPalettedContainer(final T defaultValue, final Strategy<T> strategy) {
         super(defaultValue, strategy);
         this.defaultValue = defaultValue;
         this.strategy = strategy;
-        this.entryCount = strategy.entryCount();
-        this.maxIndirectBits = this.entryCount == 4096 ? 8 : 3;
-        this.tracksAir = defaultValue instanceof BlockState;
         this.storage = new SingleStorage<>(defaultValue);
     }
 
@@ -52,9 +44,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         super(defaultValue, strategy);
         this.defaultValue = defaultValue;
         this.strategy = strategy;
-        this.entryCount = strategy.entryCount();
-        this.maxIndirectBits = this.entryCount == 4096 ? 8 : 3;
-        this.tracksAir = defaultValue instanceof BlockState;
         this.storage = storage;
     }
 
@@ -93,16 +82,6 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         } catch (RuntimeException exception) {
             return DataResult.error(() -> "Failed to read optimized PalettedContainer: " + exception.getMessage());
         }
-    }
-
-    @Override
-    public void acquire() {
-        this.threadingDetector.checkAndLock();
-    }
-
-    @Override
-    public void release() {
-        this.threadingDetector.checkAndUnlock();
     }
 
     @Override
@@ -178,21 +157,21 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             }
 
             int[] unpackBuf = TO_INT_BUF.get();
-            if (bits <= this.maxIndirectBits) {
+            if (bits <= this.maxIndirectBits()) {
                 int paletteSize = buffer.readVarInt();
                 List<T> palette = new ArrayList<>(paletteSize);
                 for (int i = 0; i < paletteSize; i++) {
                     palette.add(this.strategy.globalMap().byIdOrThrow(buffer.readVarInt()));
                 }
 
-                SimpleBitStorage packed = new SimpleBitStorage(bits, this.entryCount);
+                SimpleBitStorage packed = new SimpleBitStorage(bits, this.entryCount());
                 buffer.readFixedSizeLongArray(packed.getRaw());
                 packed.unpack(unpackBuf);
                 this.storage = this.storageFromLocalIds(palette, unpackBuf);
                 return;
             }
 
-            SimpleBitStorage packed = new SimpleBitStorage(storageBitsForWire(bits, this.strategy), this.entryCount);
+            SimpleBitStorage packed = new SimpleBitStorage(storageBitsForWire(bits, this.strategy), this.entryCount());
             buffer.readFixedSizeLongArray(packed.getRaw());
             packed.unpack(unpackBuf);
             this.storage = this.globalStorageFromIds(unpackBuf);
@@ -207,7 +186,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         try {
             Storage<T> snapshot = this.storage;
-            snapshot.write(buffer, this.strategy.globalMap(), this.entryCount, this.maxIndirectBits);
+            snapshot.write(buffer, this.strategy.globalMap(), this.entryCount(), this.maxIndirectBits());
         } finally {
             this.release();
         }
@@ -232,13 +211,13 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
     @Override
     public int getSerializedSize() {
-        return this.storage.serializedSize(this.strategy.globalMap(), this.entryCount, this.maxIndirectBits);
+        return this.storage.serializedSize(this.strategy.globalMap(), this.entryCount(), this.maxIndirectBits());
     }
 
     @Override
     @VisibleForTesting
     public int bitsPerEntry() {
-        return this.storage.bits(this.entryCount, this.maxIndirectBits, this.strategy.globalMap());
+        return this.storage.bits(this.entryCount(), this.maxIndirectBits(), this.strategy.globalMap());
     }
 
     @Override
@@ -253,7 +232,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
     @Override
     public void count(final PalettedContainer.CountConsumer<T> output) {
-        this.storage.count(output, this.strategy.globalMap(), this.entryCount);
+        this.storage.count(output, this.strategy.globalMap(), this.entryCount());
     }
 
     @Override
@@ -266,9 +245,24 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
      * Allows callers to bypass valueAt() entirely for uniform-air sections.
      */
     public boolean isUniformAir() {
-        return this.tracksAir
+        return this.tracksAir()
             && this.storage instanceof SingleStorage<T> single
             && isAir(single.value());
+    }
+
+    /** Section cell count, derived from the strategy instead of a cached field. */
+    private int entryCount() {
+        return this.strategy.entryCount();
+    }
+
+    /** Max palette bits before storage must spill to global IDs (8 for blocks, 3 for biomes). */
+    private int maxIndirectBits() {
+        return this.entryCount() == 4096 ? 8 : 3;
+    }
+
+    /** Whether this container tracks air (block sections do; biome sections don't). */
+    private boolean tracksAir() {
+        return this.defaultValue instanceof BlockState;
     }
 
     @Override
@@ -304,12 +298,12 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         }
 
         if (values.size() <= this.maxIndirectPaletteSize()) {
-            IndirectStorage<T> next = new IndirectStorage<>(this.entryCount, values);
+            IndirectStorage<T> next = new IndirectStorage<>(this.entryCount(), values);
             old.copyInto(next, this.strategy.globalMap());
             return next;
         }
 
-        GlobalStorage<T> next = GlobalStorage.create(this.entryCount, this.strategy.globalMap());
+        GlobalStorage<T> next = GlobalStorage.create(this.entryCount(), this.strategy.globalMap());
         old.copyInto(next, this.strategy.globalMap());
         return next;
     }
@@ -323,9 +317,9 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             return new IndirectStorage<>(ids, palette);
         }
 
-        int[] globalIds = new int[this.entryCount];
+        int[] globalIds = new int[this.entryCount()];
         IdMap<T> globalMap = this.strategy.globalMap();
-        for (int i = 0; i < this.entryCount; i++) {
+        for (int i = 0; i < this.entryCount(); i++) {
             globalIds[i] = globalMap.getId(palette.get(ids[i]));
         }
 
@@ -353,7 +347,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
     }
 
     private int maxIndirectPaletteSize() {
-        return 1 << this.maxIndirectBits;
+        return 1 << this.maxIndirectBits();
     }
 
     private static int storageBitsForWire(final int wireBits, final Strategy<?> strategy) {
