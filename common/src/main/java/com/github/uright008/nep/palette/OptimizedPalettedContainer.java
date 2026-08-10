@@ -642,7 +642,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
                 buffer.writeVarInt(globalMap.getId((T)this.palette[i]));
             }
 
-            buffer.writeFixedSizeLongArray(packBits(bits, entryCount, this.toIntIds(entryCount)));
+            buffer.writeFixedSizeLongArray(packBits(bits, entryCount, this.ids));
         }
 
         @Override
@@ -805,7 +805,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         @Override
         public T valueAt(final int index, final IdMap<T> globalMap) {
-            return globalMap.byIdOrThrow(this.ids[index]);
+            return globalMap.byId(this.ids[index]);
         }
 
         @Override
@@ -993,7 +993,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         @Override
         public T valueAt(final int index, final IdMap<T> globalMap) {
-            return globalMap.byIdOrThrow(this.ids[index]);
+            return globalMap.byId(this.ids[index]);
         }
 
         @Override
@@ -1223,7 +1223,14 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         return Math.max(1, bits);
     }
 
+    private static void requireBits(final int bits) {
+        if (bits < 1) {
+            throw new IllegalArgumentException("bits must be >= 1, got " + bits);
+        }
+    }
+
     private static int storageLongs(final int entryCount, final int bits) {
+        requireBits(bits);
         // Vanilla SimpleBitStorage layout: each long packs floor(64/bits) values with
         // padding (cellIndex = index / valuesPerLong), NOT contiguous bits across longs.
         int valuesPerLong = 64 / bits;
@@ -1232,12 +1239,30 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
     /** Bit-pack int[] values into a long[] for wire/save format, bypassing SimpleBitStorage allocation. */
     private static long[] packBits(final int bits, final int entryCount, final int[] values) {
+        requireBits(bits);
         int valuesPerLong = 64 / bits;
         long[] result = new long[storageLongs(entryCount, bits)];
         for (int i = 0; i < entryCount; i++) {
             int longIdx = i / valuesPerLong;
             int bitOffset = (i % valuesPerLong) * bits;
             result[longIdx] |= ((long)values[i] & ((1L << bits) - 1)) << bitOffset;
+        }
+        return result;
+    }
+
+    /**
+     * Bit-pack byte[] local palette ids into a long[] for wire/save format.
+     * IndirectStorage hot path: avoids expanding 4096 byte ids into an int[] on
+     * every section write (and the ThreadLocal buffer that int[] used).
+     */
+    private static long[] packBits(final int bits, final int entryCount, final byte[] ids) {
+        requireBits(bits);
+        int valuesPerLong = 64 / bits;
+        long[] result = new long[storageLongs(entryCount, bits)];
+        for (int i = 0; i < entryCount; i++) {
+            int longIdx = i / valuesPerLong;
+            int bitOffset = (i % valuesPerLong) * bits;
+            result[longIdx] |= (long)(ids[i] & 0xFF) << bitOffset;
         }
         return result;
     }
