@@ -131,7 +131,11 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             return single.value();
         }
         if (storage instanceof IndirectStorage<T> indirect) {
-            return (T)indirect.palette()[indirect.ids()[index] & 0xFF];
+            Object[] pal = indirect.palette();
+            if (indirect.nibbles()) {
+                return (T)pal[indirect.ids()[index >> 1] >> ((index & 1) << 2) & 0xF];
+            }
+            return (T)pal[indirect.ids()[index] & 0xFF];
         }
         final IdMap<T> globalMap = this.strategy.globalMap();
         if (storage instanceof CharGlobalStorage<T> chars) {
@@ -498,8 +502,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         @Override
         public void copyInto(final IndirectStorage<T> target, final IdMap<T> globalMap) {
-            int id = target.idForExisting(this.value);
-            Arrays.fill(target.ids, (byte)id);
+            target.fill(target.idForExisting(this.value));
         }
 
         @Override
@@ -509,13 +512,22 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
     }
 
     private static final class IndirectStorage<T> implements Storage<T> {
-        private final byte[] ids;
+        /**
+         * Cell ids. In 4-bit mode (palette <= 16) each byte packs two nibbles
+         * (cell 2i in the high nibble, cell 2i+1 in the low nibble), halving
+         * the array to entryCount/2 and matching vanilla's 4-bit packed size.
+         * In 8-bit mode each byte holds one cell id.
+         */
+        private byte[] ids;
+        private boolean nibbles;
         private Object[] palette;
         private Reference2IntOpenHashMap<T> reverse;
         private int size;
 
         IndirectStorage(final int entryCount, final List<T> entries) {
-            this.ids = new byte[entryCount];
+            boolean nibbleMode = entries.size() <= SMALL_PALETTE_SIZE;
+            this.nibbles = nibbleMode;
+            this.ids = new byte[nibbleMode ? entryCount / 2 : entryCount];
             int cap = Math.min(1 << bits(entries.size()), MAX_BYTE_PALETTE_SIZE);
             this.palette = new Object[cap];
             if (entries.size() > SMALL_PALETTE_SIZE) {
@@ -536,14 +548,57 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         IndirectStorage(final int[] ids, final List<T> entries) {
             this(ids.length, entries);
             for (int i = 0; i < ids.length; i++) {
-                this.ids[i] = (byte)ids[i];
+                this.setCellId(i, ids[i]);
             }
+        }
+
+        /** Id of cell {@code index}, decoded from the nibble/byte layout. */
+        private int idAt(final int index) {
+            if (this.nibbles) {
+                return this.ids[index >> 1] >> ((index & 1) << 2) & 0xF;
+            }
+            return this.ids[index] & 0xFF;
+        }
+
+        /** Writes cell {@code index} in the nibble/byte layout. */
+        private void setCellId(final int index, final int id) {
+            if (this.nibbles) {
+                int slot = index >> 1;
+                int shift = (index & 1) << 2;
+                this.ids[slot] = (byte)((this.ids[slot] & ~(0xF << shift)) | ((id & 0xF) << shift));
+            } else {
+                this.ids[index] = (byte)id;
+            }
+        }
+
+        /** Number of addressable cells (double the array length in 4-bit mode). */
+        private int cellCount() {
+            return this.nibbles ? this.ids.length << 1 : this.ids.length;
+        }
+
+        /** Fills every cell with {@code id} (palette of exactly one value). */
+        private void fill(final int id) {
+            if (this.nibbles) {
+                Arrays.fill(this.ids, (byte)(id | id << 4));
+            } else {
+                Arrays.fill(this.ids, (byte)id);
+            }
+        }
+
+        /** Grows 4-bit storage to 8-bit when the palette exceeds 16 entries. */
+        private void expandToBytes() {
+            byte[] expanded = new byte[this.ids.length << 1];
+            for (int i = 0; i < expanded.length; i++) {
+                expanded[i] = (byte)(this.ids[i >> 1] >> ((i & 1) << 2) & 0xF);
+            }
+            this.ids = expanded;
+            this.nibbles = false;
         }
 
         @Override
         @SuppressWarnings("unchecked")
         public T valueAt(final int index, final IdMap<T> globalMap) {
-            return (T)this.palette[this.ids[index] & 0xFF];
+            return (T)this.palette[this.idAt(index)];
         }
 
         byte[] ids() {
@@ -552,6 +607,10 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         Object[] palette() {
             return this.palette;
+        }
+
+        boolean nibbles() {
+            return this.nibbles;
         }
 
         @Override
@@ -575,16 +634,17 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         @Override
         public void setId(final int index, final int id, final T value, final IdMap<T> globalMap) {
-            this.ids[index] = (byte)id;
+            this.setCellId(index, id);
         }
 
         @Override
         public void getAll(final Consumer<T> consumer, final IdMap<T> globalMap) {
             IntOpenHashSet seen = new IntOpenHashSet();
-            for (byte id : this.ids) {
-                int unsigned = id & 0xFF;
-                if (seen.add(unsigned)) {
-                    consumer.accept((T)this.palette[unsigned]);
+            int cells = this.cellCount();
+            for (int i = 0; i < cells; i++) {
+                int id = this.idAt(i);
+                if (seen.add(id)) {
+                    consumer.accept((T)this.palette[id]);
                 }
             }
         }
@@ -613,9 +673,8 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             int[] counts = COUNT_BUF.get();
             final int localSize = this.size;
             Arrays.fill(counts, 0, localSize, 0);
-            final byte[] localIds = this.ids;
             for (int i = 0; i < entryCount; i++) {
-                int id = localIds[i] & 0xFF;
+                int id = this.idAt(i);
                 if (id < localSize) {
                     counts[id]++;
                 }
@@ -642,7 +701,11 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
                 buffer.writeVarInt(globalMap.getId((T)this.palette[i]));
             }
 
-            buffer.writeFixedSizeLongArray(packBits(bits, entryCount, this.ids));
+            if (this.nibbles) {
+                buffer.writeFixedSizeLongArray(packBits(bits, entryCount, this.toIntIds(entryCount)));
+            } else {
+                buffer.writeFixedSizeLongArray(packBits(bits, entryCount, this.ids));
+            }
         }
 
         @Override
@@ -674,7 +737,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         @Override
         public Storage<T> copy() {
-            IndirectStorage<T> copy = new IndirectStorage<>(this.ids.length, this.paletteValues(null));
+            IndirectStorage<T> copy = new IndirectStorage<>(this.cellCount(), this.paletteValues(null));
             System.arraycopy(this.ids, 0, copy.ids, 0, this.ids.length);
             return copy;
         }
@@ -691,15 +754,17 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
 
         @Override
         public void copyInto(final IndirectStorage<T> target, final IdMap<T> globalMap) {
-            for (int i = 0; i < this.ids.length; i++) {
-                target.ids[i] = (byte)target.idForExisting((T)this.palette[this.ids[i] & 0xFF]);
+            int cells = this.cellCount();
+            for (int i = 0; i < cells; i++) {
+                target.setCellId(i, target.idForExisting((T)this.palette[this.idAt(i)]));
             }
         }
 
         @Override
         public void copyInto(final GlobalStorage<T> target, final IdMap<T> globalMap) {
-            for (int i = 0; i < this.ids.length; i++) {
-                target.setGlobalId(i, globalMap.getId((T)this.palette[this.ids[i] & 0xFF]));
+            int cells = this.cellCount();
+            for (int i = 0; i < cells; i++) {
+                target.setGlobalId(i, globalMap.getId((T)this.palette[this.idAt(i)]));
             }
         }
 
@@ -724,6 +789,9 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             }
 
             int id = this.size++;
+            if (this.nibbles && id >= SMALL_PALETTE_SIZE) {
+                this.expandToBytes();
+            }
             this.ensurePaletteCapacity(id);
             this.palette[id] = value;
             if (this.reverse == null && id == SMALL_PALETTE_SIZE) {
@@ -752,7 +820,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             int bits = ceilLog2(globalMap.size());
             int[] globalIds = new int[entryCount];
             for (int i = 0; i < entryCount; i++) {
-                globalIds[i] = globalMap.getId((T)this.palette[this.ids[i] & 0xFF]);
+                globalIds[i] = globalMap.getId((T)this.palette[this.idAt(i)]);
             }
 
             buffer.writeByte(bits);
@@ -762,7 +830,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         private int[] toIntIds(final int entryCount) {
             int[] out = TO_INT_BUF.get();
             for (int i = 0; i < entryCount; i++) {
-                out[i] = this.ids[i] & 0xFF;
+                out[i] = this.idAt(i);
             }
 
             return out;
@@ -927,7 +995,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         @Override
         public void copyInto(final IndirectStorage<T> target, final IdMap<T> globalMap) {
             for (int i = 0; i < this.ids.length; i++) {
-                target.ids[i] = (byte)target.idForExisting(globalMap.byIdOrThrow(this.ids[i]));
+                target.setCellId(i, target.idForExisting(globalMap.byIdOrThrow(this.ids[i])));
             }
         }
 
@@ -1114,7 +1182,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         @Override
         public void copyInto(final IndirectStorage<T> target, final IdMap<T> globalMap) {
             for (int i = 0; i < this.ids.length; i++) {
-                target.ids[i] = (byte)target.idForExisting(globalMap.byIdOrThrow(this.ids[i]));
+                target.setCellId(i, target.idForExisting(globalMap.byIdOrThrow(this.ids[i])));
             }
         }
 
