@@ -318,7 +318,7 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         }
 
         if (palette.size() <= this.maxIndirectPaletteSize()) {
-            return new IndirectStorage<>(ids, palette);
+            return new IndirectStorage<>(this.entryCount(), ids, palette);
         }
 
         int[] globalIds = new int[this.entryCount()];
@@ -545,9 +545,9 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
             return paletteSize <= 1 ? 1 : 32 - Integer.numberOfLeadingZeros(paletteSize - 1);
         }
 
-        IndirectStorage(final int[] ids, final List<T> entries) {
-            this(ids.length, entries);
-            for (int i = 0; i < ids.length; i++) {
+        IndirectStorage(final int entryCount, final int[] ids, final List<T> entries) {
+            this(entryCount, entries);
+            for (int i = 0; i < entryCount; i++) {
                 this.setCellId(i, ids[i]);
             }
         }
