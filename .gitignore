@@ -15,6 +15,9 @@ libraries/
 cache/
 versions/
 
+# NeoForge moddev run directory (local server runtime state)
+neoforge/run/
+
 .omo/
 
 # Browser-automation tooling snapshots (private dev noise)

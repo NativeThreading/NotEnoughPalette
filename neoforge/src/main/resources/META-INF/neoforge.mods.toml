@@ -1,3 +1,7 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+
 [[mods]]
 modId = "notenoughpalette"
 version = "${version}"

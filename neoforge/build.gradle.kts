@@ -20,6 +20,12 @@ sourceSets {
 
 neoForge {
 	version = providers.gradleProperty("neoforge_version").get()
+	runs {
+		create("server") {
+			server()
+			gameDirectory = layout.projectDirectory.dir("run")
+		}
+	}
 }
 
 repositories {
