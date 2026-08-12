@@ -18,6 +18,9 @@ versions/
 # NeoForge moddev run directory (local server runtime state)
 neoforge/run/
 
+# Fabric run directory (local client/server runtime state)
+fabric/run/
+
 .omo/
 
 # Browser-automation tooling snapshots (private dev noise)
