@@ -40,12 +40,21 @@ fabricApi {
 
 repositories {
 	mavenCentral()
+	maven {
+		name = "CaffeineMC"
+		url = uri("https://maven.caffeinemc.net/releases")
+	}
 }
 
 dependencies {
 	minecraft("com.mojang:minecraft:${providers.gradleProperty("minecraft_version").get()}")
 	implementation("net.fabricmc:fabric-loader:${providers.gradleProperty("loader_version").get()}")
 	implementation("net.fabricmc.fabric-api:fabric-api:${providers.gradleProperty("fabric_api_version").get()}")
+
+	// Sodium's PalettedContainerROExtension, so NEP can implement its fast
+	// section unpack via a fabric-side mixin. CompileOnly: NEP must not hard-depend
+	// on Sodium at runtime (the interface is added by mixin, only when Sodium exists).
+	compileOnly("net.caffeinemc:sodium-fabric:${providers.gradleProperty("sodium_version").get()}")
 
 	testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")

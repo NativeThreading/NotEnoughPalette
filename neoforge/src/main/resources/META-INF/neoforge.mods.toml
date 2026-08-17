@@ -12,3 +12,6 @@ logoFile = "assets/notenoughpalette/icon.png"
 
 [[mixins]]
 config = "notenoughpalette.mixins.json"
+
+[[mixins]]
+config = "notenoughpalette.sodium.mixins.json"

@@ -9,7 +9,8 @@
 	"entrypoints": {
 	},
 	"mixins": [
-		"notenoughpalette.mixins.json"
+		"notenoughpalette.mixins.json",
+		"notenoughpalette.sodium.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.19.3",

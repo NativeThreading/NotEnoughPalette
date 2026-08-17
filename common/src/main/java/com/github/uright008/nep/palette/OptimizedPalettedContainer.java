@@ -149,6 +149,51 @@ public final class OptimizedPalettedContainer<T> extends PalettedContainer<T> {
         this.storage.getAll(consumer, this.strategy.globalMap());
     }
 
+    /**
+     * Bulk-unpacks every cell into {@code out}, in section index order, by reading
+     * the storage arrays directly — no per-cell get()/coordinate math. This is
+     * the fast path behind the Sodium {@code sodium$unpack} interface (fabric
+     * mixin) and is significantly cheaper than Sodium's per-cell
+     * {@code palette.valueFor()} loop because it never makes a virtual call per cell.
+     *
+     * @param out array of at least {@link #entryCount()} cells
+     */
+    public void fillArray(final T[] out) {
+        Storage<T> s = this.storage;
+        final int n = this.entryCount();
+        if (s instanceof SingleStorage<T> single) {
+            Arrays.fill(out, 0, n, single.value());
+            return;
+        }
+        if (s instanceof IndirectStorage<T> ind) {
+            Object[] pal = ind.palette();
+            if (ind.nibbles()) {
+                byte[] ids = ind.ids();
+                for (int i = 0; i < n; i++) {
+                    out[i] = (T)pal[ids[i >> 1] >> ((i & 1) << 2) & 0xF];
+                }
+            } else {
+                byte[] ids = ind.ids();
+                for (int i = 0; i < n; i++) {
+                    out[i] = (T)pal[ids[i] & 0xFF];
+                }
+            }
+            return;
+        }
+        IdMap<T> globalMap = this.strategy.globalMap();
+        if (s instanceof CharGlobalStorage<T> chars) {
+            char[] ids = chars.ids();
+            for (int i = 0; i < n; i++) {
+                out[i] = globalMap.byId(ids[i]);
+            }
+            return;
+        }
+        int[] ids = ((IntGlobalStorage<T>)s).ids();
+        for (int i = 0; i < n; i++) {
+            out[i] = globalMap.byId(ids[i]);
+        }
+    }
+
     @Override
     public void read(final FriendlyByteBuf buffer) {
         this.acquire();
