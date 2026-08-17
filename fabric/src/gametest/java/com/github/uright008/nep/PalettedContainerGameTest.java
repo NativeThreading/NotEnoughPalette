@@ -1,19 +1,29 @@
 package com.github.uright008.nep;
 
 import com.github.uright008.nep.palette.OptimizedPalettedContainer;
+import com.mojang.serialization.DataResult;
 import io.netty.buffer.Unpooled;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.core.SectionPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
+import net.minecraft.world.level.chunk.PalettedContainerRO;
+import net.minecraft.world.level.chunk.Strategy;
 
 /**
  * In-game integration tests for the {@link OptimizedPalettedContainer} swap.
@@ -78,6 +88,32 @@ public final class PalettedContainerGameTest {
         Blocks.OBSIDIAN.defaultBlockState(),
         Blocks.AIR.defaultBlockState()
     };
+
+    /**
+     * >256 distinct real BlockStates, collected programmatically from the 26.2
+     * block registry plus the multi-block ColorCollections. Pushes a section
+     * into global (CharGlobalStorage) storage — the regime gametest previously
+     * never exercised.
+     */
+    private static BlockState[] globalPalette() {
+        Set<BlockState> states = new HashSet<>();
+        // Every distinct default state in the whole block registry (26.2 has 852 blocks).
+        for (Block block : BuiltInRegistries.BLOCK) {
+            states.add(block.defaultBlockState());
+        }
+        // Guarantee we're well past 256 even if registry iteration is trimmed by the test world.
+        List<Block> extra = new ArrayList<>();
+        extra.addAll(Blocks.WOOL.asList());
+        extra.addAll(Blocks.CONCRETE.asList());
+        extra.addAll(Blocks.DYED_TERRACOTTA.asList());
+        extra.addAll(Blocks.STAINED_GLASS.asList());
+        extra.addAll(Blocks.CARPET.asList());
+        extra.addAll(Blocks.GLAZED_TERRACOTTA.asList());
+        for (Block block : extra) {
+            states.add(block.defaultBlockState());
+        }
+        return states.toArray(new BlockState[0]);
+    }
 
     @GameTest(maxTicks = 20, padding = 48)
     public void factoryCreatesOptimizedContainer(GameTestHelper helper) {
@@ -194,6 +230,166 @@ public final class PalettedContainerGameTest {
         helper.succeed();
     }
 
+    @GameTest(maxTicks = 20, padding = 48)
+    public void globalStorage_roundTrip(GameTestHelper helper) {
+        BlockState[] palette = globalPalette();
+        helper.assertTrue(palette.length > 256,
+                "global palette must exceed 256 distinct states to force global storage, got " + palette.length);
+
+        LevelChunkSection original = new LevelChunkSection(
+                PalettedContainerFactory.create(helper.getLevel().registryAccess()));
+        fill(original, palette);
+
+        // >256 states must have left byte indirect storage and entered global.
+        helper.assertTrue(original.getStates().bitsPerEntry() > 8,
+                "expected global bit width (>8), got " + original.getStates().bitsPerEntry());
+
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        original.write(buffer);
+
+        LevelChunkSection restored = new LevelChunkSection(
+                PalettedContainerFactory.create(helper.getLevel().registryAccess()));
+        buffer.readerIndex(0);
+        restored.read(buffer);
+
+        helper.assertTrue(restored.getStates() instanceof OptimizedPalettedContainer<?>,
+                "read path must keep section states optimized");
+        helper.assertTrue(restored.getStates().bitsPerEntry() == original.getStates().bitsPerEntry(),
+                "bitsPerEntry mismatch after save/load");
+        assertSectionsEqual(helper, original, restored, "global");
+        helper.succeed();
+    }
+
+    @GameTest(maxTicks = 20, padding = 48)
+    public void nibbleToByteUpgrade_16To17(GameTestHelper helper) {
+        // Use 15 distinct states: with the section's implicit air that is exactly
+        // 16 palette entries (the nibble boundary). A 16th distinct state added
+        // afterward must cross into byte mode.
+        BlockState[] base15 = new BlockState[15];
+        for (int i = 0; i < 15; i++) {
+            base15[i] = Blocks.WOOL.asList().get(i).defaultBlockState();
+        }
+
+        LevelChunkSection section = new LevelChunkSection(
+                PalettedContainerFactory.create(helper.getLevel().registryAccess()));
+        // Fill cells 0..14 with 15 distinct states (nibble mode, bits 4 once air joins).
+        for (int i = 0; i < 15; i++) {
+            section.setBlockState(i, 0, 0, base15[i]);
+        }
+        helper.assertTrue(section.getStates().bitsPerEntry() == 4,
+                "15 states + air should stay in 4-bit nibble mode, got " + section.getStates().bitsPerEntry());
+
+        // Add a 16th distinct state -> palette 17 -> nibble -> byte expansion.
+        section.setBlockState(15, 0, 0, Blocks.DIAMOND_BLOCK.defaultBlockState());
+        helper.assertTrue(section.getStates().bitsPerEntry() >= 5,
+                "16th distinct state should expand to byte mode (>=5 bits), got "
+                        + section.getStates().bitsPerEntry());
+
+        // Every cell must read back correctly after the expansion.
+        for (int i = 0; i < 15; i++) {
+            BlockState expected = base15[i];
+            BlockState actual = section.getBlockState(i, 0, 0);
+            if (expected != actual) {
+                helper.fail("cell " + i + " corrupted after nibble->byte expansion: " + actual + " != " + expected);
+            }
+        }
+        helper.assertTrue(section.getBlockState(15, 0, 0) == Blocks.DIAMOND_BLOCK.defaultBlockState(),
+                "16th cell did not survive expansion");
+        helper.succeed();
+    }
+
+    @GameTest(maxTicks = 20, padding = 48)
+    public void uniformAirAndHasOnlyAir_fastPath(GameTestHelper helper) {
+        // A factory-created section starts as a uniform-air container.
+        LevelChunkSection section = new LevelChunkSection(
+                PalettedContainerFactory.create(helper.getLevel().registryAccess()));
+        helper.assertTrue(section.getStates() instanceof OptimizedPalettedContainer<?>,
+                "states must be optimized");
+        OptimizedPalettedContainer<?> states = (OptimizedPalettedContainer<?>) section.getStates();
+        helper.assertTrue(states.isUniformAir(),
+                "fresh factory section must be uniform air");
+        helper.assertTrue(section.hasOnlyAir(),
+                "fresh factory section must have only air");
+
+        // Place one block -> no longer uniform air.
+        section.setBlockState(0, 0, 0, Blocks.STONE.defaultBlockState());
+        states = (OptimizedPalettedContainer<?>) section.getStates();
+        helper.assertTrue(!states.isUniformAir(),
+                "section with a block must not be uniform air");
+        helper.assertTrue(!section.hasOnlyAir(),
+                "section with a block must not have only air");
+        helper.succeed();
+    }
+
+    @GameTest(maxTicks = 20, padding = 48)
+    public void biomeContainer_functional(GameTestHelper helper) {
+        // A real factory-created section's biome container must be optimized and
+        // survive a write/read round-trip (biomes are holder-indexed).
+        LevelChunkSection section = new LevelChunkSection(
+                PalettedContainerFactory.create(helper.getLevel().registryAccess()));
+        helper.assertTrue(section.getBiomes() instanceof OptimizedPalettedContainer<?>,
+                "section biomes must be an OptimizedPalettedContainer");
+
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        section.write(buffer);
+
+        LevelChunkSection restored = new LevelChunkSection(
+                PalettedContainerFactory.create(helper.getLevel().registryAccess()));
+        buffer.readerIndex(0);
+        restored.read(buffer);
+
+        helper.assertTrue(restored.getBiomes() instanceof OptimizedPalettedContainer<?>,
+                "read path must keep biomes optimized");
+        for (int y = 0; y < 4; y++) {
+            for (int z = 0; z < 4; z++) {
+                for (int x = 0; x < 4; x++) {
+                    Holder<Biome> expected = section.getBiomes().get(x, y, z);
+                    Holder<Biome> actual = restored.getBiomes().get(x, y, z);
+                    if (expected != actual) {
+                        helper.fail("biome save/load mismatch at (" + x + "," + y + "," + z + "): "
+                                + actual + " != " + expected);
+                    }
+                }
+            }
+        }
+        helper.succeed();
+    }
+
+    @GameTest(maxTicks = 20, padding = 48)
+    public void unpackMixinPath_rebuildSection(GameTestHelper helper) {
+        // Exercise the static PalettedContainer.unpack path (redirected by
+        // PalettedContainerMixin) to rebuild a section from a packed container —
+        // the NBT/chunk-load path mixin, which section.read(FriendlyByteBuf) bypasses.
+        BlockState[] palette = FILL_PALETTE;
+        LevelChunkSection original = new LevelChunkSection(
+                PalettedContainerFactory.create(helper.getLevel().registryAccess()));
+        fill(original, palette);
+
+        Strategy<BlockState> strategy = Strategy.createForBlockStates(
+                net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY);
+        PalettedContainerRO.PackedData<BlockState> packed = original.getStates().pack(strategy);
+        DataResult<PalettedContainer<BlockState>> result = PalettedContainer.unpack(strategy, packed);
+        helper.assertTrue(result.error().isEmpty(),
+                "unpack through mixin path errored: " + result.error());
+        PalettedContainer<BlockState> rebuilt = result.result().orElseThrow();
+        helper.assertTrue(rebuilt instanceof OptimizedPalettedContainer<?>,
+                "unpack must produce an optimized container");
+
+        for (int y = 0; y < 16; y++) {
+            for (int z = 0; z < 16; z++) {
+                for (int x = 0; x < 16; x++) {
+                    BlockState expected = original.getBlockState(x, y, z);
+                    BlockState actual = rebuilt.get(x, y, z);
+                    if (expected != actual) {
+                        helper.fail("unpack rebuild mismatch at (" + x + "," + y + "," + z + "): "
+                                + actual + " != " + expected);
+                    }
+                }
+            }
+        }
+        helper.succeed();
+    }
+
     private static void fill(LevelChunkSection section, BlockState[] palette) {
         for (int y = 0; y < 16; y++) {
             for (int z = 0; z < 16; z++) {
@@ -210,6 +406,21 @@ public final class PalettedContainerGameTest {
 
     private static BlockState paletteAt(int index, BlockState[] palette) {
         return palette[index % palette.length];
+    }
+
+    private static void assertSectionsEqual(GameTestHelper helper, LevelChunkSection expected,
+            LevelChunkSection actual, String label) {
+        for (int y = 0; y < 16; y++) {
+            for (int z = 0; z < 16; z++) {
+                for (int x = 0; x < 16; x++) {
+                    BlockState e = expected.getBlockState(x, y, z);
+                    BlockState a = actual.getBlockState(x, y, z);
+                    if (e != a) {
+                        helper.fail(label + " mismatch at (" + x + "," + y + "," + z + "): " + a + " != " + e);
+                    }
+                }
+            }
+        }
     }
 
     private static void assertSectionContains(GameTestHelper helper, BlockPos relative,

@@ -20,10 +20,29 @@ sourceSets {
 
 neoForge {
 	version = providers.gradleProperty("neoforge_version").get()
+	runs {
+		create("server") {
+			server()
+			gameDirectory = layout.projectDirectory.dir("run")
+		}
+	}
 }
 
 repositories {
 	mavenCentral()
+	maven {
+		name = "CaffeineMC"
+		url = uri("https://maven.caffeinemc.net/releases")
+	}
+}
+
+dependencies {
+	// Sodium's PalettedContainerROExtension, so NEP can implement its fast
+	// section unpack via a neoforge-side mixin. CompileOnly: NEP must not hard-depend
+	// on Sodium at runtime (the interface is added by mixin, only when Sodium exists).
+	// The PalettedContainerROExtension interface is identical across Fabric and
+	// NeoForge Sodium, so we compile against the Fabric artifact.
+	compileOnly("net.caffeinemc:sodium-fabric:${providers.gradleProperty("sodium_version").get()}")
 }
 
 

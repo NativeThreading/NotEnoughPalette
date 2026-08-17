@@ -27,6 +27,8 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
@@ -58,8 +60,11 @@ jobs:
         with:
           modrinth-id: wupAPOwH
           modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ steps.release.outputs.version }}
           version-type: ${{ steps.release.outputs.type }}
+          github-generate-changelog: true
           game-versions: 26.2
           loaders: fabric neoforge
+          environment: server? | client?
           files: build/libs/notenoughpalette-*.jar

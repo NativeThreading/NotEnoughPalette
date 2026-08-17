@@ -79,10 +79,12 @@ class ConcurrencyTest {
         second.join(5_000);
 
         assertThat(secondThreadThrown.get()).isInstanceOf(ReportedException.class);
-        assertThat(mainThrown.getMessage()).isEqualTo("Accessing OptimizedPalettedContainer from multiple threads");
+        // NEP inherits the vanilla ThreadingDetector (its own field was removed to
+        // save ~150B per container), so the crash report names the superclass.
+        assertThat(mainThrown.getMessage()).isEqualTo("Accessing PalettedContainer from multiple threads");
         assertThat(mainThrown.getCause())
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Accessing OptimizedPalettedContainer from multiple threads");
+                .hasMessage("Accessing PalettedContainer from multiple threads");
     }
 
     @Test
@@ -107,7 +109,7 @@ class ConcurrencyTest {
 
         assertThat(secondThreadThrown.get()).isInstanceOf(ReportedException.class);
         assertThat(secondThreadThrown.get().getMessage())
-                .isEqualTo("Accessing OptimizedPalettedContainer from multiple threads");
+                .isEqualTo("Accessing PalettedContainer from multiple threads");
     }
 
     @Test
