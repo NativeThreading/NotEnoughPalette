@@ -1,6 +1,6 @@
 # NotEnoughPalette (NEP)
 
-Optimized `PalettedContainer` replacement for Minecraft 26.2, transparently replacing vanilla block/biome storage with O(1) direct-array data structures.
+Optimized `PalettedContainer` replacement for Minecraft 26.3, transparently replacing vanilla block/biome storage with O(1) direct-array data structures.
 
 ## Build
 

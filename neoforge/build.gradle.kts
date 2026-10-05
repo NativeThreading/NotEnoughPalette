@@ -1,6 +1,6 @@
 plugins {
 	id("java-library")
-	id("net.neoforged.moddev") version "2.0.141"
+	id("net.neoforged.moddev") version "2.0.148"
 }
 
 version = providers.gradleProperty("mod_version").get()
@@ -20,6 +20,15 @@ sourceSets {
 
 neoForge {
 	version = providers.gradleProperty("neoforge_version").get()
+
+	// Without this, `runServer` starts a vanilla NeoForge server and NEP's mixins
+	// are never loaded — the dev run silently tests nothing.
+	mods {
+		register("notenoughpalette") {
+			sourceSet(sourceSets.main.get())
+		}
+	}
+
 	runs {
 		create("server") {
 			server()

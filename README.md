@@ -2,7 +2,7 @@
 
 *Optimize Minecraft's PalettedContainer.*
 
-Optimized `PalettedContainer` replacement for Minecraft 26.2 — transparently replaces vanilla block and biome storage with O(1) direct-array data structures.
+Optimized `PalettedContainer` replacement for Minecraft 26.3 — transparently replaces vanilla block and biome storage with O(1) direct-array data structures.
 
 ## Features
 
@@ -13,7 +13,7 @@ Optimized `PalettedContainer` replacement for Minecraft 26.2 — transparently r
 
 ## Installation
 
-Drop `nep-1.0.0.jar` into your `mods/` folder. Requires Fabric Loader ≥ 0.19.3 or NeoForge ≥ 26.2.0.1-beta.
+Drop `nep-1.0.0.jar` into your `mods/` folder. Requires Fabric Loader ≥ 0.19.3 or NeoForge ≥ 26.3.0.48-beta.
 
 ## Performance
 
