@@ -1,5 +1,6 @@
 {
   "required": false,
+  "plugin": "com.github.uright008.nep.compat.SodiumMixinPlugin",
   "minVersion": "0.8",
   "package": "com.github.uright008.nep.mixin",
   "compatibilityLevel": "JAVA_25",
