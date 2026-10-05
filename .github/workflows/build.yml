@@ -23,14 +23,50 @@ jobs:
           name: Artifacts
           path: build/libs/
 
-  publish:
-    needs: build
+  # A tag can be pushed from any commit on any branch. Only tags that point at a
+  # commit reachable from main are releasable, so that a tag on dev (or a stray
+  # commit) can never publish a release.
+  verify-tag:
     if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    outputs:
+      publishable: ${{ steps.check.outputs.publishable }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Check the tag is on main
+        id: check
+        run: |
+          git fetch --no-tags origin main
+          if git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "publishable=true" >> "${GITHUB_OUTPUT}"
+            echo "Tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) is reachable from main."
+          else
+            echo "publishable=false" >> "${GITHUB_OUTPUT}"
+            echo "::warning::Tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) is not reachable from main; skipping publish."
+          fi
+
+  publish:
+    needs: [build, verify-tag]
+    if: needs.verify-tag.outputs.publishable == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # The job condition above already gates this, but re-check before anything
+      # is uploaded so a mistake there fails closed instead of publishing.
+      - name: Verify the tag is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::Tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) is not reachable from main; refusing to publish."
+            exit 1
+          fi
+
       - uses: actions/setup-java@v5
         with:
           java-version: '25'
