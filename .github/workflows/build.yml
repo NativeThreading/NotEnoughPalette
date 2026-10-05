@@ -64,7 +64,7 @@ jobs:
           version: ${{ steps.release.outputs.version }}
           version-type: ${{ steps.release.outputs.type }}
           github-generate-changelog: true
-          game-versions: 26.2
+          game-versions: 26.3
           loaders: fabric neoforge
           environment: server? | client?
           files: build/libs/notenoughpalette-*.jar
